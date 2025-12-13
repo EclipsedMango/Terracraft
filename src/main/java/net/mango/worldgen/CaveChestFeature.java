@@ -25,7 +25,7 @@ public class CaveChestFeature extends Feature<DefaultFeatureConfig> {
         StructureWorldAccess world = ctx.getWorld();
 
         var random = ctx.getRandom();
-        if (random.nextInt(3) != 0) return false;
+        if (random.nextInt(2) != 0) return false;
 
         BlockPos origin = ctx.getOrigin();
         BlockPos surfaceBlock = origin.down();

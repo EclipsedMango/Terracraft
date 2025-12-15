@@ -58,7 +58,6 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
 
     private static final Identifier HEIGHT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "height_deriver");
     private static final Identifier HEIGHT_RANDOM_ID  = Identifier.of(TerraCraft.MOD_ID, "height_random");
-
     private static final Identifier PLANT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "plants_deriver");
 
     private volatile SimplexNoiseSampler heightNoise;
@@ -244,9 +243,6 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
 
         long s = world.getSeed() ^ (cp.x * 341873128712L) ^ (cp.z * 132897987541L) ^ 0x6A09E667F3BCC909L;
         Random rand = Random.create(s);
-
-        // higher value == fewer trees
-        if (rand.nextInt(6) != 0) return;
 
         int attempts = 1 + rand.nextInt(2);
         for (int i = 0; i < attempts; i++) {

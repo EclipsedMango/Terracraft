@@ -19,8 +19,12 @@ import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Identifier;
 import net.minecraft.world.border.WorldBorder;
+import net.minecraft.world.rule.GameRule;
+import net.minecraft.world.rule.GameRules;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.lang.reflect.Field;
 
 public class TerraCraft implements ModInitializer {
 	public static final String MOD_ID = "terracraft";
@@ -33,7 +37,16 @@ public class TerraCraft implements ModInitializer {
 
 		Registry.register(Registries.CHUNK_GENERATOR, GENERATOR_ID, PlainsBorderChunkGenerator.CODEC);
 
-		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+		try {
+            Field defaultValue = GameRule.class.getDeclaredField("defaultValue");
+			defaultValue.setAccessible(true);
+			defaultValue.set(GameRules.KEEP_INVENTORY, true);
+
+		} catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
+
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             WorldBorder border = server.getOverworld().getWorldBorder();
 			border.setCenter(0.0, 0.0);
 			border.setSize(512.0);

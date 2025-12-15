@@ -3,7 +3,7 @@
 	"package": "net.mango.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
-		"ExampleMixin"
+      "ItemMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -179,28 +179,19 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
 
                     Random pr = plantRandom(noiseConfig, wx, wz);
 
-                    // density gate (example: 75% of blocks get a plant)
+                    // density (example: 75% of blocks get a plant) without clumping
                     if (pr.nextInt(100) >= 75) continue;
 
-                    // choose short vs tall (example: 99% short, 1% tall)
+                    // type (example: 80% grass, 20% non-grass)
+                    boolean isGrass = pr.nextInt(100) < 80;
                     boolean tall = pr.nextInt(100) < 1;
-                    boolean fern = pr.nextInt(100) < 10;
-                    boolean bush = pr.nextInt(100) < 15;
+                    boolean bush = pr.nextInt(100) < 60;
 
                     mpos.set(wx, plantY, wz);
 
                     if (!chunk.getBlockState(mpos).isAir()) continue;
 
-                    if (!tall) {
-                        if (fern) {
-                            chunk.setBlockState(mpos, Blocks.FERN.getDefaultState(), 0);
-                        } else if (bush) {
-                            chunk.setBlockState(mpos, Blocks.BUSH.getDefaultState(), 0);
-                        } else {
-                            chunk.setBlockState(mpos, Blocks.SHORT_GRASS.getDefaultState(), 0);
-                        }
-
-                    } else {
+                    if (tall) {
                         mpos.set(wx, plantY + 1, wz);
                         if (!chunk.getBlockState(mpos).isAir()) continue;
 
@@ -212,7 +203,12 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
 
                         mpos.set(wx, plantY + 1, wz);
                         chunk.setBlockState(mpos, upper, 0);
+
+                        continue;
                     }
+
+                    BlockState blockState = (isGrass) ? Blocks.SHORT_GRASS.getDefaultState() : (bush) ? Blocks.BUSH.getDefaultState() : Blocks.FERN.getDefaultState();
+                    chunk.setBlockState(mpos, blockState, 0);
                 }
             }
 

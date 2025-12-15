@@ -9,6 +9,7 @@ import net.mango.TerraCraft;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.enums.DoubleBlockHalf;
+import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.RegistryOps;
 import net.minecraft.registry.entry.RegistryEntry;
@@ -31,6 +32,8 @@ import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.gen.StructureAccessor;
 import net.minecraft.world.gen.chunk.ChunkGenerator;
 import net.minecraft.world.gen.chunk.VerticalBlockSample;
+import net.minecraft.world.gen.feature.PlacedFeature;
+import net.minecraft.world.gen.feature.TreePlacedFeatures;
 import net.minecraft.world.gen.noise.NoiseConfig;
 import net.minecraft.world.gen.chunk.Blender;
 
@@ -182,13 +185,23 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
 
                     // choose short vs tall (example: 99% short, 1% tall)
                     boolean tall = pr.nextInt(100) < 1;
+                    boolean fern = pr.nextInt(100) < 10;
+                    boolean bush = pr.nextInt(100) < 15;
+
                     mpos.set(wx, plantY, wz);
 
-                    if (!tall) {
-                        if (chunk.getBlockState(mpos).isAir()) chunk.setBlockState(mpos, Blocks.SHORT_GRASS.getDefaultState(), 0);
-                    } else {
-                        if (!chunk.getBlockState(mpos).isAir()) continue;
+                    if (!chunk.getBlockState(mpos).isAir()) continue;
 
+                    if (!tall) {
+                        if (fern) {
+                            chunk.setBlockState(mpos, Blocks.FERN.getDefaultState(), 0);
+                        } else if (bush) {
+                            chunk.setBlockState(mpos, Blocks.BUSH.getDefaultState(), 0);
+                        } else {
+                            chunk.setBlockState(mpos, Blocks.SHORT_GRASS.getDefaultState(), 0);
+                        }
+
+                    } else {
                         mpos.set(wx, plantY + 1, wz);
                         if (!chunk.getBlockState(mpos).isAir()) continue;
 
@@ -222,6 +235,29 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
     @Override
     public void generateFeatures(StructureWorldAccess world, Chunk chunk, StructureAccessor structureAccessor) {
         if (outsideBorder(chunk.getPos())) return;
+
+        Registry<PlacedFeature> placed = world.getRegistryManager().getOrThrow(RegistryKeys.PLACED_FEATURE);
+        PlacedFeature oakChecked = placed.get(TreePlacedFeatures.OAK_CHECKED);
+        if (oakChecked == null) return;
+
+        ChunkPos cp = chunk.getPos();
+
+        long s = world.getSeed() ^ (cp.x * 341873128712L) ^ (cp.z * 132897987541L) ^ 0x6A09E667F3BCC909L;
+        Random rand = Random.create(s);
+
+        // higher value == fewer trees
+        if (rand.nextInt(6) != 0) return;
+
+        int attempts = 1 + rand.nextInt(2);
+        for (int i = 0; i < attempts; i++) {
+            int x = cp.getStartX() + rand.nextInt(16);
+            int z = cp.getStartZ() + rand.nextInt(16);
+
+            int y = world.getTopY(Heightmap.Type.WORLD_SURFACE_WG, x, z);
+            BlockPos origin = new BlockPos(x, y, z);
+
+            oakChecked.generate(world, this, rand, origin);
+        }
     }
 
     @Override

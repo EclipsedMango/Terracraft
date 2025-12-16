@@ -6,7 +6,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.mango.item.ModItems;
-import net.mango.worldgen.PlainsBorderChunkGenerator;
+import net.mango.worldgen.SmallWorldChunkGenerator;
 import net.mango.worldgen.TerracraftFeatures;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -35,7 +35,7 @@ public class TerraCraft implements ModInitializer {
 	public void onInitialize() {
 		LOGGER.info("Hello Fabric world!");
 
-		Registry.register(Registries.CHUNK_GENERATOR, GENERATOR_ID, PlainsBorderChunkGenerator.CODEC);
+		Registry.register(Registries.CHUNK_GENERATOR, GENERATOR_ID, SmallWorldChunkGenerator.CODEC);
 
 		try {
             Field defaultValue = GameRule.class.getDeclaredField("defaultValue");

@@ -9,9 +9,7 @@ import net.mango.TerraCraft;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.enums.DoubleBlockHalf;
-import net.minecraft.registry.Registry;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.RegistryOps;
+import net.minecraft.registry.*;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.Identifier;
@@ -20,10 +18,7 @@ import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.noise.SimplexNoiseSampler;
 import net.minecraft.util.math.random.Random;
-import net.minecraft.world.ChunkRegion;
-import net.minecraft.world.HeightLimitView;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.StructureWorldAccess;
+import net.minecraft.world.*;
 import net.minecraft.world.biome.Biome;
 import net.minecraft.world.biome.BiomeKeys;
 import net.minecraft.world.biome.source.BiomeAccess;
@@ -38,27 +33,30 @@ import net.minecraft.world.gen.noise.NoiseConfig;
 import net.minecraft.world.gen.chunk.Blender;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
-public class PlainsBorderChunkGenerator extends ChunkGenerator {
-    public static final int RADIUS = 512;
+import static net.mango.worldgen.SmallWorldParams.smoothstep;
+
+public class SmallWorldChunkGenerator extends ChunkGenerator {
+    public static final int RADIUS = SmallWorldParams.RADIUS;
 
     private static final int MIN_Y = -64;
     private static final int WORLD_HEIGHT = 384;
-    private static final int SEA_LEVEL = 50;
+    private static final int SEA_LEVEL = SmallWorldParams.SEA_LEVEL;
 
     private static final int BEDROCK_Y = -64;
 
     private static final int BASE_SURFACE_Y = 63;
-    private static final double HILL_SCALE_1 = 0.008; // lower = wider hills
-    private static final double HILL_SCALE_2 = 0.02;
-    private static final double HILL_AMP_1 = 5.0; // min hill height
-    private static final double HILL_AMP_2 = 2.0;
+    private static final double HILL_SCALE_1 = SmallWorldParams.HILL_SCALE_1;
+    private static final double HILL_SCALE_2 = SmallWorldParams.HILL_SCALE_2;
+    private static final double HILL_AMP_1 = SmallWorldParams.HILL_AMP_1;
+    private static final double HILL_AMP_2 = SmallWorldParams.HILL_AMP_1;
 
-    private static final int BEACH_WIDTH = 256;
-    private static final int SLOPE_WIDTH = 10;
-    private static final int OCEAN_FLOOR_Y = SEA_LEVEL - 8;
+    private static final int BEACH_WIDTH = SmallWorldParams.BEACH_WIDTH;
+    private static final int SLOPE_WIDTH = SmallWorldParams.SLOPE_WIDTH;
+    private static final int OCEAN_FLOOR_Y = SmallWorldParams.OCEAN_FLOOR_Y;
     private static final int DEEP_OCEAN_FLOOR_Y = SEA_LEVEL - 16;
 
     private static final Identifier HEIGHT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "height_deriver");
@@ -67,21 +65,23 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
 
     private volatile SimplexNoiseSampler heightNoise;
 
-    public static final MapCodec<PlainsBorderChunkGenerator> CODEC = new MapCodec<>() {
+    public static final MapCodec<SmallWorldChunkGenerator> CODEC = new MapCodec<>() {
         @Override
-        public <T> DataResult<PlainsBorderChunkGenerator> decode(DynamicOps<T> ops, MapLike<T> input) {
+        public <T> DataResult<SmallWorldChunkGenerator> decode(DynamicOps<T> ops, MapLike<T> input) {
             if (!(ops instanceof RegistryOps<T> registryOps)) {
                 return DataResult.error(() -> "PlainsBorderChunkGenerator requires RegistryOps");
             }
 
-            var biomeLookup = registryOps.getEntryLookup(RegistryKeys.BIOME);
+            Optional<RegistryEntryLookup<Biome>> biomeLookup = registryOps.getEntryLookup(RegistryKeys.BIOME);
             RegistryEntry<Biome> plains = biomeLookup.orElseThrow().getOrThrow(BiomeKeys.PLAINS);
+            RegistryEntry<Biome> beach = biomeLookup.orElseThrow().getOrThrow(BiomeKeys.BEACH);
+            RegistryEntry<Biome> ocean = biomeLookup.orElseThrow().getOrThrow(BiomeKeys.OCEAN);
 
-            return DataResult.success(new PlainsBorderChunkGenerator(plains));
+            return DataResult.success(new SmallWorldChunkGenerator(plains, beach, ocean));
         }
 
         @Override
-        public <T> RecordBuilder<T> encode(PlainsBorderChunkGenerator value, DynamicOps<T> ops, RecordBuilder<T> builder) {
+        public <T> RecordBuilder<T> encode(SmallWorldChunkGenerator value, DynamicOps<T> ops, RecordBuilder<T> builder) {
             return builder;
         }
 
@@ -91,8 +91,8 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
         }
     };
 
-    private PlainsBorderChunkGenerator(RegistryEntry<Biome> plains) {
-        super(new FixedBiomeSource(plains));
+    private SmallWorldChunkGenerator(RegistryEntry<Biome> plains, RegistryEntry<Biome> beach, RegistryEntry<Biome> ocean) {
+        super(new SmallWorldBiomeSource(plains, beach, ocean, 0L));
     }
 
     @Override
@@ -143,11 +143,6 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
         var deriver = noiseConfig.getOrCreateRandomDeriver(PLANT_DERIVER_ID);
         long salt = ((long) x * 341873128712L) ^ ((long) z * 132897987541L);
         return deriver.split(salt);
-    }
-
-    private static double smoothstep(double t) {
-        t = MathHelper.clamp(t, 0.0, 1.0);
-        return t * t * (3.0 - 2.0 * t);
     }
 
     private static double oceanBlend(int x, int z) {

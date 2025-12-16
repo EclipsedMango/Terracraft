@@ -29,7 +29,7 @@ import java.lang.reflect.Field;
 public class TerraCraft implements ModInitializer {
 	public static final String MOD_ID = "terracraft";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
-	public static final Identifier GENERATOR_ID = Identifier.of(MOD_ID, "plains_border");
+	public static final Identifier GENERATOR_ID = Identifier.of(MOD_ID, "small_world");
 
 	@Override
 	public void onInitialize() {

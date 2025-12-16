@@ -42,11 +42,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
 public class PlainsBorderChunkGenerator extends ChunkGenerator {
-    public static final int RADIUS = 256;
+    public static final int RADIUS = 512;
 
     private static final int MIN_Y = -64;
     private static final int WORLD_HEIGHT = 384;
-    private static final int SEA_LEVEL = 63;
+    private static final int SEA_LEVEL = 50;
 
     private static final int BEDROCK_Y = -64;
 
@@ -55,6 +55,11 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
     private static final double HILL_SCALE_2 = 0.02;
     private static final double HILL_AMP_1 = 5.0; // min hill height
     private static final double HILL_AMP_2 = 2.0;
+
+    private static final int BEACH_WIDTH = 256;
+    private static final int SLOPE_WIDTH = 10;
+    private static final int OCEAN_FLOOR_Y = SEA_LEVEL - 8;
+    private static final int DEEP_OCEAN_FLOOR_Y = SEA_LEVEL - 16;
 
     private static final Identifier HEIGHT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "height_deriver");
     private static final Identifier HEIGHT_RANDOM_ID  = Identifier.of(TerraCraft.MOD_ID, "height_random");
@@ -118,11 +123,20 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
         double n1 = heightNoise.sample(x * HILL_SCALE_1, z * HILL_SCALE_1);
         double n2 = heightNoise.sample(x * HILL_SCALE_2, z * HILL_SCALE_2);
 
-        double h = BASE_SURFACE_Y + (n1 * HILL_AMP_1) + (n2 * HILL_AMP_2);
+        double inland = BASE_SURFACE_Y + (n1 * HILL_AMP_1) + (n2 * HILL_AMP_2);
+
+        double oceanNoise = heightNoise.sample(x * 0.02, z * 0.02) * 2.0;
+        double ocean = (OCEAN_FLOOR_Y + oceanNoise);
+
+        double b = oceanBlend(x, z);
+        double deep = DEEP_OCEAN_FLOOR_Y + oceanNoise;
+        double oceanTarget = MathHelper.lerp(b, ocean, deep);
+
+        double h = MathHelper.lerp(b, inland, oceanTarget);
 
         int min = MIN_Y + 1;
         int max = MIN_Y + WORLD_HEIGHT - 2;
-        return MathHelper.clamp((int) Math.round(h), min, max);
+        return MathHelper.clamp((int)Math.round(h), min, max);
     }
 
     private Random plantRandom(NoiseConfig noiseConfig, int x, int z) {
@@ -131,12 +145,20 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
         return deriver.split(salt);
     }
 
+    private static double smoothstep(double t) {
+        t = MathHelper.clamp(t, 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    }
+
+    private static double oceanBlend(int x, int z) {
+        int d = Math.max(Math.abs(x), Math.abs(z));
+        int start = RADIUS - BEACH_WIDTH;
+        int end = RADIUS + SLOPE_WIDTH;
+        return smoothstep((d - start) / (double)(end - start));
+    }
+
     @Override
     public CompletableFuture<Chunk> populateNoise(Blender blender, NoiseConfig noiseConfig, StructureAccessor structureAccessor, Chunk chunk) {
-        if (outsideBorder(chunk.getPos())) {
-            return CompletableFuture.completedFuture(chunk);
-        }
-
         return CompletableFuture.supplyAsync(() -> {
             BlockState bedrock = Blocks.BEDROCK.getDefaultState();
             BlockState stone = Blocks.STONE.getDefaultState();
@@ -173,6 +195,27 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
 
                     mpos.set(wx, topY, wz);
                     chunk.setBlockState(mpos, grass, 0);
+
+                    double oceanBlend = oceanBlend(wx, wz);
+
+                    // second condition is for blocks to be different at deep sea levels
+                    boolean isGrassBlock = !(topY <= SEA_LEVEL + 1 && oceanBlend > 0.15) && !(oceanBlend > 0.65);
+                    BlockState topBlock = (isGrassBlock) ? Blocks.GRASS_BLOCK.getDefaultState() : Blocks.SAND.getDefaultState();
+
+                    mpos.set(wx, topY, wz);
+                    chunk.setBlockState(mpos, topBlock, 0);
+
+                    if (topY < SEA_LEVEL) {
+                        BlockState water = Blocks.WATER.getDefaultState();
+                        for (int y = topY + 1; y <= SEA_LEVEL; y++) {
+                            mpos.set(wx, y, wz);
+                            if (chunk.getBlockState(mpos).isAir()) {
+                                chunk.setBlockState(mpos, water, 0);
+                            }
+                        }
+                    }
+
+                    if (topY <= SEA_LEVEL || oceanBlend > 0.9) continue;
 
                     int plantY = topY + 1;
                     if (!chunk.getBlockState(mpos).isOf(Blocks.GRASS_BLOCK)) continue;
@@ -216,7 +259,6 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
         });
     }
 
-
     @Override
     public void carve(ChunkRegion chunkRegion, long seed, NoiseConfig noiseConfig, BiomeAccess biomeAccess, StructureAccessor structureAccessor, Chunk chunk) {
         if (outsideBorder(chunk.getPos())) return;
@@ -231,11 +273,14 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
     public void generateFeatures(StructureWorldAccess world, Chunk chunk, StructureAccessor structureAccessor) {
         if (outsideBorder(chunk.getPos())) return;
 
+        ChunkPos cp = chunk.getPos();
+
+        double centerBlend = oceanBlend(cp.getCenterX(), cp.getCenterZ());
+        if (centerBlend > 0.9) return;
+
         Registry<PlacedFeature> placed = world.getRegistryManager().getOrThrow(RegistryKeys.PLACED_FEATURE);
         PlacedFeature oakChecked = placed.get(TreePlacedFeatures.OAK_CHECKED);
         if (oakChecked == null) return;
-
-        ChunkPos cp = chunk.getPos();
 
         long s = world.getSeed() ^ (cp.x * 341873128712L) ^ (cp.z * 132897987541L) ^ 0x6A09E667F3BCC909L;
         Random rand = Random.create(s);
@@ -298,6 +343,7 @@ public class PlainsBorderChunkGenerator extends ChunkGenerator {
             else if (y <= stoneTop) s = stone;
             else if (y < topY) s = dirt;
             else if (y == topY) s = grass;
+            else if (y <= SEA_LEVEL) s = Blocks.WATER.getDefaultState();
             else s = air;
 
             states[i] = s;

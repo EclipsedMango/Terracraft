@@ -49,7 +49,7 @@ public class TerraCraft implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             WorldBorder border = server.getOverworld().getWorldBorder();
 			border.setCenter(0.0, 0.0);
-			border.setSize(512.0);
+			border.setSize(1024);
 		});
 
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {

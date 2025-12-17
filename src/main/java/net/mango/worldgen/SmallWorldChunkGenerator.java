@@ -35,10 +35,7 @@ import net.minecraft.world.gen.feature.TreePlacedFeatures;
 import net.minecraft.world.gen.noise.NoiseConfig;
 import net.minecraft.world.gen.chunk.Blender;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
@@ -53,11 +50,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
 
     private static final int BEDROCK_Y = -64;
 
-    private static final int BASE_SURFACE_Y = 63;
-    private static final double HILL_SCALE_1 = SmallWorldParams.HILL_SCALE_1;
-    private static final double HILL_SCALE_2 = SmallWorldParams.HILL_SCALE_2;
-    private static final double HILL_AMP_1 = SmallWorldParams.HILL_AMP_1;
-    private static final double HILL_AMP_2 = SmallWorldParams.HILL_AMP_1;
+    private static final int BASE_SURFACE_Y = SmallWorldParams.BASE_SURFACE_Y;
 
     private static final int BEACH_WIDTH = SmallWorldParams.BEACH_WIDTH;
     private static final int SLOPE_WIDTH = SmallWorldParams.SLOPE_WIDTH;
@@ -78,6 +71,14 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
 
     private volatile SimplexNoiseSampler heightNoise;
     private SimplexNoiseSampler tempMap;
+
+    private static final List<CustomBiomeBlendParams> BIOME_BLEND_PARAMS = List.of(
+            new CustomBiomeBlendParams(CustomBiomeEnum.PLAINS, 0.0, 0.0),
+            new CustomBiomeBlendParams(CustomBiomeEnum.DESERT, 1.0, 0.6),
+            new CustomBiomeBlendParams(CustomBiomeEnum.SNOW, -1.0, 0.6),
+            new CustomBiomeBlendParams(CustomBiomeEnum.BEACH, 0.2, 0.95),
+            new CustomBiomeBlendParams(CustomBiomeEnum.OCEAN, 0.0, 1.0)
+    );
 
     public static final MapCodec<SmallWorldChunkGenerator> CODEC = new MapCodec<>() {
         @Override
@@ -119,33 +120,78 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         return CODEC;
     }
 
-    private CustomBiomeEnum getBiomeAt(BlockPos blockPos, int surfaceHeight) {
-        double tempScale = 512.0;
+    private CustomBiomeEnum getBiomeAt(BlockPos blockPos) {
+        int x = blockPos.getX();
+        int z = blockPos.getZ();
+        double distance = Math.sqrt(x * x + z * z);
 
-        double temp = tempMap.sample(blockPos.getX() / tempScale, blockPos.getZ() / tempScale);
-        double oceanBeachBlend = oceanBlend(blockPos.getX(), blockPos.getZ());
+        if (distance < 128) return CustomBiomeEnum.PLAINS;
 
-        if (surfaceHeight < SEA_LEVEL && blockPos.getY() * 4 > surfaceHeight - 16) {
+        double oceanBlend = oceanBlend(x, z);
+        int surfaceHeight = getSurfaceHeight(x, z, CustomBiomeEnum.OCEAN);
+
+        if (surfaceHeight < SEA_LEVEL && oceanBlend > 0.1) {
             return CustomBiomeEnum.OCEAN;
         }
-
-        if (oceanBeachBlend > 0.1 && surfaceHeight <= SEA_LEVEL + 2) {
+        if (oceanBlend > 0.1 && surfaceHeight <= SEA_LEVEL + 2) {
             return CustomBiomeEnum.BEACH;
         }
 
-        if (blockPos.isWithinDistance(new Vec3i(0, blockPos.getY(), 0), 128.0)) {
-            return CustomBiomeEnum.PLAINS;
+        Map<CustomBiomeEnum, Double> weights = getBlendingWeights(x, z);
+        weights.remove(CustomBiomeEnum.BEACH);
+        weights.remove(CustomBiomeEnum.OCEAN);
+
+        CustomBiomeEnum bestBiome = CustomBiomeEnum.PLAINS;
+        double maxWeight = Double.NEGATIVE_INFINITY;
+        for (Map.Entry<CustomBiomeEnum, Double> entry : weights.entrySet()) {
+            if (entry.getValue() > maxWeight) {
+                maxWeight = entry.getValue();
+                bestBiome = entry.getKey();
+            }
         }
 
-        if (temp <= -0.5) {
-            return CustomBiomeEnum.SNOW;
+        return bestBiome;
+    }
+
+    private Map<CustomBiomeEnum, Double> getBlendingWeights(int x, int z) {
+        double tempScale = 512.0;
+        double temp = tempMap.sample(x / tempScale, z / tempScale);
+
+        double blendPower = 3.0;
+        double epsilon = 0.0001;
+
+        Map<CustomBiomeEnum, Double> weights = new EnumMap<>(CustomBiomeEnum.class);
+        double totalWeight = 0.0;
+
+        for (CustomBiomeBlendParams param : BIOME_BLEND_PARAMS) {
+            if (param.biome == CustomBiomeEnum.BEACH || param.biome == CustomBiomeEnum.OCEAN) continue;
+
+            double dist = Math.abs(param.temp - temp);
+            double weight = 1.0 / Math.pow(dist + epsilon, blendPower);
+            weights.put(param.biome, weight);
+            totalWeight += weight;
         }
 
-        if (temp >= 0.5) {
-            return CustomBiomeEnum.DESERT;
+        for (CustomBiomeEnum biome : weights.keySet()) {
+            weights.put(biome, weights.get(biome) / totalWeight);
         }
 
-        return CustomBiomeEnum.PLAINS;
+        return weights;
+    }
+
+    private CustomNoiseParams getBlendedNoiseParams(int x, int z) {
+        Map<CustomBiomeEnum, Double> weights = getBlendingWeights(x, z);
+
+        double scale1 = 0, scale2 = 0, amp1 = 0, amp2 = 0;
+        for (CustomBiomeEnum biome : CustomBiomeEnum.values()) {
+            double w = weights.getOrDefault(biome, 0.0);
+            scale1 += biome.HILL_SCALE_1 * w;
+            scale2 += biome.HILL_SCALE_2 * w;
+            amp1   += biome.HILL_AMP_1 * w;
+            amp2   += biome.HILL_AMP_2 * w;
+        }
+
+        return new CustomNoiseParams(scale1, scale2, amp1, amp2);
     }
 
     private void initialize(NoiseConfig noiseConfig) {
@@ -165,9 +211,9 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         while (true) {
             for (int x = -RADIUS; x < RADIUS; x += 16) {
                 for (int z = -RADIUS; z < RADIUS; z += 16) {
-                    int surfaceHeight = getSurfaceHeight(x, z, noiseConfig);
+                    int surfaceHeight = getSurfaceHeight(x, z);
 
-                    CustomBiomeEnum biome = getBiomeAt(new BlockPos(x, surfaceHeight, z), surfaceHeight);
+                    CustomBiomeEnum biome = getBiomeAt(new BlockPos(x, surfaceHeight, z));
                     counts.compute(biome, (bio, val) -> val == null ? 1 : val + 1);
                 }
             }
@@ -183,19 +229,16 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private static boolean outsideBorder(ChunkPos pos) {
-        int cx = Math.abs(pos.getStartX() + 8);
-        int cz = Math.abs(pos.getStartZ() + 8);
-        return Math.max(cx, cz) > RADIUS;
+    private int getSurfaceHeight(int x, int z) {
+        return getSurfaceHeight(x, z, getBiomeAt(new BlockPos(x, SEA_LEVEL, z)));
     }
 
-    private int getSurfaceHeight(int x, int z, NoiseConfig noiseConfig) {
-        initialize(noiseConfig);
+    private int getSurfaceHeight(int x, int z, CustomBiomeEnum biome) {
+        CustomNoiseParams params = getBlendedNoiseParams(x, z);
+        double n1 = heightNoise.sample(x * params.scale1, z * params.scale1);
+        double n2 = heightNoise.sample(x * params.scale2, z * params.scale2);
 
-        double n1 = heightNoise.sample(x * HILL_SCALE_1, z * HILL_SCALE_1);
-        double n2 = heightNoise.sample(x * HILL_SCALE_2, z * HILL_SCALE_2);
-
-        double inland = BASE_SURFACE_Y + (n1 * HILL_AMP_1) + (n2 * HILL_AMP_2);
+        double inland = BASE_SURFACE_Y + (n1 * params.amp1) + (n2 * params.amp2);
 
         double oceanNoise = heightNoise.sample(x * 0.02, z * 0.02) * 2.0;
         double ocean = (OCEAN_FLOOR_Y + oceanNoise);
@@ -230,106 +273,10 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         return CompletableFuture.completedFuture(chunk);
     }
 
-    private void generateTerrain(NoiseConfig noiseConfig, Chunk chunk) {
-        BlockState bedrock = Blocks.BEDROCK.getDefaultState();
-        BlockState stone = Blocks.STONE.getDefaultState();
-        BlockState dirt = Blocks.DIRT.getDefaultState();
-        BlockState grass = Blocks.GRASS_BLOCK.getDefaultState();
-        BlockState sand = Blocks.SAND.getDefaultState();
-
-        BlockPos.Mutable mpos = new BlockPos.Mutable();
-        ChunkPos cpos = chunk.getPos();
-
-        int startX = cpos.getStartX();
-        int startZ = cpos.getStartZ();
-
-        for (int lx = 0; lx < 16; lx++) {
-            for (int lz = 0; lz < 16; lz++) {
-                int wx = startX + lx;
-                int wz = startZ + lz;
-
-                int topY = getSurfaceHeight(wx, wz, noiseConfig);
-
-                mpos.set(wx, BEDROCK_Y, wz);
-                chunk.setBlockState(mpos, bedrock, 0);
-
-                int stoneTop = Math.max(BEDROCK_Y + 1, topY - 4);
-
-                for (int y = BEDROCK_Y + 1; y <= stoneTop; y++) {
-                    mpos.set(wx, y, wz);
-                    chunk.setBlockState(mpos, stone, 0);
-                }
-
-                for (int y = stoneTop + 1; y <= topY - 1; y++) {
-                    mpos.set(wx, y, wz);
-                    chunk.setBlockState(mpos, dirt, 0);
-                }
-
-                if (chunk.getBiomeForNoiseGen(wx, topY, wz).matchesId(Identifier.of("plains"))) {
-                    mpos.set(wx, topY, wz);
-                    chunk.setBlockState(mpos, grass, 0);
-                }
-
-                if (chunk.getBiomeForNoiseGen(wx, topY, wz).matchesId(Identifier.of("ocean"))) {
-                    if (topY < SEA_LEVEL) {
-                        BlockState water = Blocks.WATER.getDefaultState();
-                        for (int y = topY + 1; y <= SEA_LEVEL; y++) {
-                            mpos.set(wx, y, wz);
-                            if (chunk.getBlockState(mpos).isAir()) {
-                                chunk.setBlockState(mpos, water, 0);
-                            }
-                        }
-                    }
-                }
-
-                if (chunk.getBiomeForNoiseGen(wx, topY, wz).matchesId(Identifier.of("beach"))) {
-                    mpos.set(wx, topY, wz);
-                    chunk.setBlockState(mpos, sand, 0);
-                }
-
-                if (!chunk.getBiomeForNoiseGen(wx, topY, wz).matchesId(Identifier.of("plains"))) continue;
-
-                int plantY = topY + 1;
-                if (!chunk.getBlockState(mpos).isOf(Blocks.GRASS_BLOCK)) continue;
-
-                Random pr = plantRandom(noiseConfig, wx, wz);
-
-                // density (example: 75% of blocks get a plant) without clumping
-                if (pr.nextInt(100) >= 75) continue;
-
-                // type (example: 80% grass, 20% non-grass)
-                boolean isGrass = pr.nextInt(100) < 80;
-                boolean tall = pr.nextInt(100) < 1;
-                boolean bush = pr.nextInt(100) < 60;
-
-                mpos.set(wx, plantY, wz);
-
-                if (!chunk.getBlockState(mpos).isAir()) continue;
-
-                if (tall) {
-                    mpos.set(wx, plantY + 1, wz);
-                    if (!chunk.getBlockState(mpos).isAir()) continue;
-
-                    BlockState lower = Blocks.TALL_GRASS.getDefaultState().with(Properties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER);
-                    BlockState upper = Blocks.TALL_GRASS.getDefaultState().with(Properties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER);
-
-                    mpos.set(wx, plantY, wz);
-                    chunk.setBlockState(mpos, lower, 0);
-
-                    mpos.set(wx, plantY + 1, wz);
-                    chunk.setBlockState(mpos, upper, 0);
-
-                    continue;
-                }
-
-                BlockState blockState = (isGrass) ? Blocks.SHORT_GRASS.getDefaultState() : (bush) ? Blocks.BUSH.getDefaultState() : Blocks.FERN.getDefaultState();
-                chunk.setBlockState(mpos, blockState, 0);
-            }
-        }
-    }
-
     @Override
     public CompletableFuture<Chunk> populateBiomes(NoiseConfig noiseConfig, Blender blender, StructureAccessor structureAccessor, Chunk chunk) {
+        initialize(noiseConfig);
+
         ChunkPos cp = chunk.getPos();
         var sampler = noiseConfig.getMultiNoiseSampler();
 
@@ -345,8 +292,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
                 int wy = qy * 4 + 2;
                 int wz = qz * 4 + 2;
 
-                int surfaceHeight = getSurfaceHeight(wx, wz, noiseConfig);
-                return biomes.get(getBiomeAt(new BlockPos(wx, wy, wz), surfaceHeight));
+                return biomes.get(getBiomeAt(new BlockPos(wx, wy, wz)));
 
             }, sampler, startQuartX, startQuartY, startQuartZ);
         }
@@ -355,13 +301,11 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public void carve(ChunkRegion chunkRegion, long seed, NoiseConfig noiseConfig, BiomeAccess biomeAccess, StructureAccessor structureAccessor, Chunk chunk) {
-        if (outsideBorder(chunk.getPos())) return;
-    }
+    public void carve(ChunkRegion chunkRegion, long seed, NoiseConfig noiseConfig, BiomeAccess biomeAccess, StructureAccessor structureAccessor, Chunk chunk) {}
 
     @Override
     public void buildSurface(ChunkRegion region, StructureAccessor structureAccessor, NoiseConfig noiseConfig, Chunk chunk) {
-        if (outsideBorder(chunk.getPos())) return;
+        initialize(noiseConfig);
 
         BlockState bedrock = Blocks.BEDROCK.getDefaultState();
         BlockState stone = Blocks.STONE.getDefaultState();
@@ -380,7 +324,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
                 int wx = startX + lx;
                 int wz = startZ + lz;
 
-                int topY = getSurfaceHeight(wx, wz, noiseConfig);
+                int topY = getSurfaceHeight(wx, wz);
 
                 mpos.set(wx, BEDROCK_Y, wz);
                 chunk.setBlockState(mpos, bedrock, 0);
@@ -397,7 +341,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
                     chunk.setBlockState(mpos, dirt, 0);
                 }
 
-                CustomBiomeEnum biome = getBiomeAt(new BlockPos(wx, topY, wz), topY);
+                CustomBiomeEnum biome = getBiomeAt(new BlockPos(wx, topY, wz));
 
                 if (biome == CustomBiomeEnum.PLAINS || biome == CustomBiomeEnum.SNOW) {
                     mpos.set(wx, topY, wz);
@@ -406,6 +350,9 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
 
                 if (biome == CustomBiomeEnum.OCEAN) {
                     BlockState water = Blocks.WATER.getDefaultState();
+                    mpos.set(wx, topY, wz);
+                    chunk.setBlockState(mpos, sand, 0);
+
                     for (int y = topY + 1; y <= SEA_LEVEL; y++) {
                         mpos.set(wx, y, wz);
                         if (chunk.getBlockState(mpos).isAir()) {
@@ -469,9 +416,6 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
     public void generateFeatures(StructureWorldAccess world, Chunk chunk, StructureAccessor structureAccessor) {
         ChunkPos cp = chunk.getPos();
 
-//        int initY = world.getTopY(Heightmap.Type.WORLD_SURFACE_WG, cp.x, cp.z);
-        if (outsideBorder(chunk.getPos())) return;
-
         Registry<PlacedFeature> placed = world.getRegistryManager().getOrThrow(RegistryKeys.PLACED_FEATURE);
         PlacedFeature oakChecked = placed.get(TreePlacedFeatures.OAK_CHECKED);
         if (oakChecked == null) return;
@@ -492,9 +436,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public void populateEntities(ChunkRegion region) {
-        if (outsideBorder(region.getCenterPos())) return;
-    }
+    public void populateEntities(ChunkRegion region) {}
 
     @Override
     public int getWorldHeight() {
@@ -513,11 +455,14 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
 
     @Override
     public int getHeight(int x, int z, Heightmap.Type heightmap, HeightLimitView world, NoiseConfig noiseConfig) {
-        return getSurfaceHeight(x, z, noiseConfig) + 1;
+        initialize(noiseConfig);
+        return getSurfaceHeight(x, z) + 1;
     }
 
     @Override
     public VerticalBlockSample getColumnSample(int x, int z, HeightLimitView world, NoiseConfig noiseConfig) {
+        initialize(noiseConfig);
+
         BlockState[] states = new BlockState[WORLD_HEIGHT];
 
         BlockState bedrock = Blocks.BEDROCK.getDefaultState();
@@ -526,7 +471,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         BlockState grass = Blocks.GRASS_BLOCK.getDefaultState();
         BlockState air = Blocks.AIR.getDefaultState();
 
-        int topY = getSurfaceHeight(x, z, noiseConfig);
+        int topY = getSurfaceHeight(x, z);
         int stoneTop = Math.max(BEDROCK_Y + 1, topY - 4);
 
         for (int i = 0; i < WORLD_HEIGHT; i++) {

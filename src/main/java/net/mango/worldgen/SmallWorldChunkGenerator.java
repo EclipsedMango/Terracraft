@@ -35,10 +35,7 @@ import net.minecraft.world.gen.feature.TreePlacedFeatures;
 import net.minecraft.world.gen.noise.NoiseConfig;
 import net.minecraft.world.gen.chunk.Blender;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
@@ -148,6 +145,59 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         return CustomBiomeEnum.PLAINS;
     }
 
+    private static class BiomeCheckStore {
+        public int id;
+        public CustomBiomeEnum biome;
+
+        public BiomeCheckStore(CustomBiomeEnum biome) {
+            this.biome = biome;
+            this.id = -1;
+        }
+    }
+
+    private record Vector2i(int x, int y) {
+        public boolean equals(Object obj) {
+            return this == obj || (obj instanceof Vector2i(int x1, int y1) && x == x1 && y == y1);
+        }
+
+        public Vector2i add(Vector2i other) {
+            return new Vector2i(x + other.x, y + other.y);
+        }
+    }
+
+    // this function is unused because it is supposed to be called by the debugger
+    // will output a string that visualizes the current biome counter
+    private String visualizePositions(Map<Vector2i, BiomeCheckStore> positions) {
+        List<Character> chars = List.of(
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+            'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+            'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+            'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+            '[', '\\', ']', '^', '_', '`', '{', '|', '}', '~', '!', '"', '#',
+            '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/', ':',
+            ';', '<', '=', '>', '?', '@'
+        );
+
+        StringBuilder output = new StringBuilder();
+
+        for (int z = -RADIUS; z < RADIUS; z += 16) {
+            for (int x = -RADIUS; x < RADIUS; x += 16) {
+                int val = positions.get(new Vector2i(x, z)).id;
+                if (val == -1) {
+                    val = 0;
+                }
+
+                output.append(chars.get(val));
+                output.append(positions.get(new Vector2i(x, z)).biome.name().charAt(0));
+            }
+
+            output.append("\n");
+        }
+
+        return output.toString();
+    }
+
     private void initialize(NoiseConfig noiseConfig) {
         if (initFinished) return;
         initFinished = true;
@@ -160,19 +210,69 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         Random tempRand = noiseConfig.getOrCreateRandomDeriver(TEMP_DERIVER_ID).split(TEMP_RANDOM_ID);
         tempMap = new SimplexNoiseSampler(tempRand);
 
-        Map<CustomBiomeEnum, Integer> counts = new HashMap<>();
+        List<Vector2i> neighbors = List.of(new Vector2i(0, -16), new Vector2i(-16, 0), new Vector2i(0, 16), new Vector2i(16, 0));
 
-        while (true) {
+        for (int retryCount = 0; ; retryCount++) {
+            Map<Vector2i, BiomeCheckStore> positions = new HashMap<>();
+            Map<CustomBiomeEnum, Integer> counts = new HashMap<>();
+
             for (int x = -RADIUS; x < RADIUS; x += 16) {
                 for (int z = -RADIUS; z < RADIUS; z += 16) {
                     int surfaceHeight = getSurfaceHeight(x, z, noiseConfig);
 
                     CustomBiomeEnum biome = getBiomeAt(new BlockPos(x, surfaceHeight, z), surfaceHeight);
-                    counts.compute(biome, (bio, val) -> val == null ? 1 : val + 1);
+                    positions.put(new Vector2i(x, z), new BiomeCheckStore(biome));
                 }
             }
 
-            if (counts.getOrDefault(CustomBiomeEnum.SNOW, 0) > 0 && counts.getOrDefault(CustomBiomeEnum.DESERT, 0) > 0) {
+            for (int x = -RADIUS; x < RADIUS; x += 16) {
+                for (int z = -RADIUS; z < RADIUS; z += 16) {
+                    Vector2i pos = new Vector2i(x, z);
+                    BiomeCheckStore biome = positions.get(pos);
+                    if (biome.id != -1) {
+                        continue;
+                    }
+
+                    Set<BiomeCheckStore> connectedUnknowns = new HashSet<>();
+                    List<Vector2i> open = new ArrayList<>();
+                    connectedUnknowns.add(biome);
+                    open.add(pos);
+
+                    List<Vector2i> newOpen = new ArrayList<>();
+                    while (!open.isEmpty()) {
+                        for (Vector2i otherPos : open) {
+                            for (Vector2i neighborPos : neighbors) {
+                                neighborPos = otherPos.add(neighborPos);
+                                BiomeCheckStore neighbor = positions.get(neighborPos);
+                                if (neighbor == null ||
+                                        neighbor.biome != biome.biome ||
+                                        connectedUnknowns.contains(neighbor) ||
+                                        neighbor.id != -1) {
+                                    continue;
+                                }
+
+                                connectedUnknowns.add(neighbor);
+                                newOpen.add(neighborPos);
+                            }
+                        }
+
+                        // clear open and set open to newOpen while clearing newOpen
+                        open.clear();
+                        List<Vector2i> temp = open;
+                        open = newOpen;
+                        newOpen = temp;
+                    }
+
+                    int count = counts.compute(biome.biome, (k, v) -> v == null ? 1 : v + 1);
+                    for (BiomeCheckStore connected : connectedUnknowns) {
+                        connected.id = count;
+                    }
+                }
+            }
+
+            TerraCraft.LOGGER.info("Biome counts: {}", counts);
+            if (counts.getOrDefault(CustomBiomeEnum.SNOW, 0) > 0 && counts.getOrDefault(CustomBiomeEnum.SNOW, 0) <= 2 && counts.getOrDefault(CustomBiomeEnum.DESERT, 0) > 0) {
+                TerraCraft.LOGGER.info("Finished in {} attempts", retryCount + 1);
                 break;
             }
 

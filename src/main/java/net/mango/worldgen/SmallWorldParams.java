@@ -9,10 +9,6 @@ public class SmallWorldParams {
     public static final int SEA_LEVEL = 50;
 
     public static final int BASE_SURFACE_Y = 63;
-    public static final double HILL_SCALE_1 = 0.008;
-    public static final double HILL_SCALE_2 = 0.02;
-    public static final double HILL_AMP_1 = 5.0;
-    public static final double HILL_AMP_2 = 2.0;
 
     public static final int BEACH_WIDTH = 256;
     public static final int SLOPE_WIDTH = 10;

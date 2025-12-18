@@ -16,6 +16,7 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3i;
 import net.minecraft.util.math.noise.SimplexNoiseSampler;
 import net.minecraft.util.math.random.Random;
 import net.minecraft.util.math.random.RandomSplitter;
@@ -38,45 +39,56 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
+import static net.mango.worldgen.SmallWorldParams.PLAINS_CENTER_RAD;
 import static net.mango.worldgen.SmallWorldParams.smoothstep;
 
 public class SmallWorldChunkGenerator extends ChunkGenerator {
     public static final int RADIUS = SmallWorldParams.RADIUS;
 
-    private static final int MIN_Y = -64;
-    private static final int WORLD_HEIGHT = 384;
+    private static final int MIN_Y = SmallWorldParams.BEDROCK_Y;
+    private static final int WORLD_HEIGHT = SmallWorldParams.WORLD_HEIGHT;
     private static final int SEA_LEVEL = SmallWorldParams.SEA_LEVEL;
 
-    private static final int BEDROCK_Y = -64;
+    private static final int BEDROCK_Y = SmallWorldParams.BEDROCK_Y;
 
     private static final int BASE_SURFACE_Y = SmallWorldParams.BASE_SURFACE_Y;
 
     private static final int BEACH_WIDTH = SmallWorldParams.BEACH_WIDTH;
     private static final int SLOPE_WIDTH = SmallWorldParams.SLOPE_WIDTH;
     private static final int OCEAN_FLOOR_Y = SmallWorldParams.OCEAN_FLOOR_Y;
-    private static final int DEEP_OCEAN_FLOOR_Y = SEA_LEVEL - 16;
+    private static final int DEEP_OCEAN_FLOOR_Y = SmallWorldParams.DEEP_OCEAN_FLOOR_Y;
+
+    private static final Identifier PLANT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "plants_deriver");
 
     private static final Identifier HEIGHT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "height_deriver");
     private static final Identifier HEIGHT_RANDOM_ID  = Identifier.of(TerraCraft.MOD_ID, "height_random");
 
-    private static final Identifier PLANT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "plants_deriver");
-
     private static final Identifier TEMP_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "temp_deriver");
     private static final Identifier TEMP_RANDOM_ID = Identifier.of(TerraCraft.MOD_ID, "temp_random");
 
-    private final Map<CustomBiomeEnum, RegistryEntry<Biome>> biomes;
+    private static final Identifier HUMID_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "humid_deriver");
+    private static final Identifier HUMID_RANDOM_ID = Identifier.of(TerraCraft.MOD_ID, "humid_random");
 
-    private boolean initFinished = false;
+    private static final Identifier BIOME_HEIGHT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "biome_height_deriver");
+    private static final Identifier BIOME_HEIGHT_RANDOM_ID  = Identifier.of(TerraCraft.MOD_ID, "biome_height_random");
 
-    private volatile SimplexNoiseSampler heightNoise;
-    private SimplexNoiseSampler tempMap;
+    private final Map<CustomBiome, RegistryEntry<Biome>> biomes;
+
+    private volatile boolean initFinished = false;
+
+    private volatile SimplexNoiseSampler heightMap;
+    private volatile SimplexNoiseSampler tempMap;
+    private volatile SimplexNoiseSampler humidMap;
+
+    private volatile SimplexNoiseSampler biomeHeightHint;
 
     private static final List<CustomBiomeBlendParams> BIOME_BLEND_PARAMS = List.of(
-            new CustomBiomeBlendParams(CustomBiomeEnum.PLAINS, 0.0, 0.0),
-            new CustomBiomeBlendParams(CustomBiomeEnum.DESERT, 1.0, 0.6),
-            new CustomBiomeBlendParams(CustomBiomeEnum.SNOW, -1.0, 0.6),
-            new CustomBiomeBlendParams(CustomBiomeEnum.BEACH, 0.2, 0.95),
-            new CustomBiomeBlendParams(CustomBiomeEnum.OCEAN, 0.0, 1.0)
+            new CustomBiomeBlendParams(CustomBiome.PLAINS, 0.0, 0.2, 0.5),
+            new CustomBiomeBlendParams(CustomBiome.DESERT, 1.0, -0.5, 0.2),
+            new CustomBiomeBlendParams(CustomBiome.SNOW, -1.0, 0.3, 0.6),
+            new CustomBiomeBlendParams(CustomBiome.JUNGLE, 0.8, 0.8, 0.8),
+            new CustomBiomeBlendParams(CustomBiome.BEACH, 0.2, 0.0, 0.0),
+            new CustomBiomeBlendParams(CustomBiome.OCEAN, 0.0, 0.0, 0.0)
     );
 
     public static final MapCodec<SmallWorldChunkGenerator> CODEC = new MapCodec<>() {
@@ -90,11 +102,12 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
             RegistryEntry<Biome> plains = biomeLookup.orElseThrow().getOrThrow(BiomeKeys.PLAINS);
 
             return DataResult.success(new SmallWorldChunkGenerator(plains, Map.of(
-                    CustomBiomeEnum.PLAINS, plains,
-                    CustomBiomeEnum.SNOW, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.SNOWY_PLAINS),
-                    CustomBiomeEnum.DESERT, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.DESERT),
-                    CustomBiomeEnum.BEACH, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.BEACH),
-                    CustomBiomeEnum.OCEAN, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.OCEAN)
+                    CustomBiome.PLAINS, plains,
+                    CustomBiome.SNOW, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.SNOWY_PLAINS),
+                    CustomBiome.DESERT, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.DESERT),
+                    CustomBiome.BEACH, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.BEACH),
+                    CustomBiome.OCEAN, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.OCEAN),
+                    CustomBiome.JUNGLE, biomeLookup.orElseThrow().getOrThrow(BiomeKeys.JUNGLE)
             )));
         }
 
@@ -109,7 +122,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         }
     };
 
-    private SmallWorldChunkGenerator(RegistryEntry<Biome> plains, Map<CustomBiomeEnum, RegistryEntry<Biome>> biomes) {
+    private SmallWorldChunkGenerator(RegistryEntry<Biome> plains, Map<CustomBiome, RegistryEntry<Biome>> biomes) {
         super(new FixedBiomeSource(plains));
         this.biomes = biomes;
     }
@@ -119,85 +132,96 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         return CODEC;
     }
 
-    private CustomBiomeEnum getBiomeAt(BlockPos blockPos) {
+    private CustomBiome getBiomeAt(BlockPos blockPos) {
         int x = blockPos.getX();
         int z = blockPos.getZ();
-        double distance = Math.sqrt(x * x + z * z);
 
-        if (distance < 128) return CustomBiomeEnum.PLAINS;
+        double b = warpedOceanBlend(x, z);
 
-        double oceanBlend = oceanBlend(x, z);
-        int surfaceHeight = getSurfaceHeight(x, z, CustomBiomeEnum.OCEAN);
-
-        if (surfaceHeight < SEA_LEVEL && oceanBlend > 0.1) {
-            return CustomBiomeEnum.OCEAN;
-        }
-        if (oceanBlend > 0.1 && surfaceHeight <= SEA_LEVEL + 2) {
-            return CustomBiomeEnum.BEACH;
+        if (blockPos.isWithinDistance(new Vec3i(0, blockPos.getY(), 0), PLAINS_CENTER_RAD)) {
+            return CustomBiome.PLAINS;
         }
 
-        Map<CustomBiomeEnum, Double> weights = getBlendingWeights(x, z);
-        weights.remove(CustomBiomeEnum.BEACH);
-        weights.remove(CustomBiomeEnum.OCEAN);
+        if (b > SmallWorldParams.OCEAN_BLEND_MAX_THRESHOLD) {
+            return CustomBiome.OCEAN;
+        } else if (b > SmallWorldParams.OCEAN_BLEND_MIN_THRESHOLD) {
+            return CustomBiome.BEACH;
+        }
 
-        CustomBiomeEnum bestBiome = CustomBiomeEnum.PLAINS;
-        double maxWeight = Double.NEGATIVE_INFINITY;
-        for (Map.Entry<CustomBiomeEnum, Double> entry : weights.entrySet()) {
-            if (entry.getValue() > maxWeight) {
-                maxWeight = entry.getValue();
-                bestBiome = entry.getKey();
+        Map<CustomBiome, Double> weights = getBlendingWeights(x, z);
+        weights.remove(CustomBiome.OCEAN);
+        weights.remove(CustomBiome.BEACH);
+
+        CustomBiome best = CustomBiome.PLAINS;
+        double bestWeight = Double.NEGATIVE_INFINITY;
+
+        for (var e : weights.entrySet()) {
+            if (e.getValue() > bestWeight) {
+                bestWeight = e.getValue();
+                best = e.getKey();
             }
         }
 
-        return bestBiome;
+        return best;
     }
 
-    private Map<CustomBiomeEnum, Double> getBlendingWeights(int x, int z) {
-        double tempScale = 512.0;
-        double temp = tempMap.sample(x / tempScale, z / tempScale);
+    private double warpedOceanBlend(int x, int z) {
+        double base = oceanBlend(x, z);
 
-        double blendPower = 3.0;
+        double warp = heightMap.sample(x * 0.01, z * 0.01) * 0.08;
+        return MathHelper.clamp(base + warp, 0.0, 1.0);
+    }
+
+    private Map<CustomBiome, Double> getBlendingWeights(int x, int z) {
+        double tempScale = 512.0;
+        double humidScale = 512.0;
+
+        double temp = tempMap.sample(x / tempScale, z / tempScale);
+        double humid = humidMap.sample(x / humidScale, z / humidScale);
+
+        double heightFreq = SmallWorldParams.HEIGHT_FREQ;
+        double mainHeight = heightMap.sample(x * heightFreq, z * heightFreq);
+
+        double normHeight = (mainHeight + 1.0) / 2.0;
+
+        double blendPower = 10.0;
         double epsilon = 0.0001;
 
-        Map<CustomBiomeEnum, Double> weights = new EnumMap<>(CustomBiomeEnum.class);
+        Map<CustomBiome, Double> weights = new EnumMap<>(CustomBiome.class);
         double totalWeight = 0.0;
 
         for (CustomBiomeBlendParams param : BIOME_BLEND_PARAMS) {
-            if (param.biome == CustomBiomeEnum.BEACH || param.biome == CustomBiomeEnum.OCEAN) continue;
+            if (param.biome == CustomBiome.BEACH || param.biome == CustomBiome.OCEAN) continue;
 
-            double dist = Math.abs(param.temp - temp);
-            double weight = 1.0 / Math.pow(dist + epsilon, blendPower);
+            double distTemp = param.temp - temp;
+            double distHumid = param.humidity - humid;
+            double distHeight = param.height - normHeight;
+
+            double dist = Math.sqrt(distTemp * distTemp + distHumid * distHumid + distHeight * distHeight);
+
+            double weight = 1.0 / Math.pow((dist + epsilon), blendPower);
             weights.put(param.biome, weight);
             totalWeight += weight;
         }
 
-        for (CustomBiomeEnum biome : weights.keySet()) {
+        for (CustomBiome biome : weights.keySet()) {
             weights.put(biome, weights.get(biome) / totalWeight);
         }
 
         return weights;
     }
 
-    private CustomNoiseParams getBlendedNoiseParams(int x, int z) {
-        Map<CustomBiomeEnum, Double> weights = getBlendingWeights(x, z);
-
-        double scale1 = 0, scale2 = 0, amp1 = 0, amp2 = 0;
-        for (CustomBiomeEnum biome : CustomBiomeEnum.values()) {
-            double w = weights.getOrDefault(biome, 0.0);
-            scale1 += biome.HILL_SCALE_1 * w;
-            scale2 += biome.HILL_SCALE_2 * w;
-            amp1   += biome.HILL_AMP_1 * w;
-            amp2   += biome.HILL_AMP_2 * w;
-        }
-
-        return new CustomNoiseParams(scale1, scale2, amp1, amp2);
+    private double getUnblendedHeight(int x, int z, CustomBiome biome) {
+        double n1 = heightMap.sample(x * biome.HILL_SCALE_1, z * biome.HILL_SCALE_1);
+        double n2 = heightMap.sample(x * biome.HILL_SCALE_2, z * biome.HILL_SCALE_2);
+        return BASE_SURFACE_Y + (n1 * biome.HILL_AMP_1) + (n2 * biome.HILL_AMP_2);
     }
 
     private static class BiomeCheckStore {
         public int id;
-        public CustomBiomeEnum biome;
+        public CustomBiome biome;
 
-        public BiomeCheckStore(CustomBiomeEnum biome) {
+        public BiomeCheckStore(CustomBiome biome) {
             this.biome = biome;
             this.id = -1;
         }
@@ -251,28 +275,37 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         initFinished = true;
 
         // height
-        Random rand = noiseConfig.getOrCreateRandomDeriver(HEIGHT_DERIVER_ID).split(HEIGHT_RANDOM_ID);
-        heightNoise = new SimplexNoiseSampler(rand);
+        Random heightRand = noiseConfig.getOrCreateRandomDeriver(HEIGHT_DERIVER_ID).split(HEIGHT_RANDOM_ID);
+        heightMap = new SimplexNoiseSampler(heightRand);
 
         // temp
         Random tempRand = noiseConfig.getOrCreateRandomDeriver(TEMP_DERIVER_ID).split(TEMP_RANDOM_ID);
         tempMap = new SimplexNoiseSampler(tempRand);
 
+        // humid
+        Random humidRand = noiseConfig.getOrCreateRandomDeriver(HUMID_DERIVER_ID).split(HUMID_RANDOM_ID);
+        humidMap = new SimplexNoiseSampler(humidRand);
+
+        // biome height
+        Random bhRand = noiseConfig.getOrCreateRandomDeriver(BIOME_HEIGHT_DERIVER_ID).split(BIOME_HEIGHT_RANDOM_ID);
+        biomeHeightHint = new SimplexNoiseSampler(bhRand);
+
         List<Vector2i> neighbors = List.of(new Vector2i(0, -16), new Vector2i(-16, 0), new Vector2i(0, 16), new Vector2i(16, 0));
 
         for (int retryCount = 0; ; retryCount++) {
             Map<Vector2i, BiomeCheckStore> positions = new HashMap<>();
-            Map<CustomBiomeEnum, Integer> counts = new HashMap<>();
+            Map<CustomBiome, Integer> counts = new HashMap<>();
 
             for (int x = -RADIUS; x < RADIUS; x += 16) {
                 for (int z = -RADIUS; z < RADIUS; z += 16) {
                     int surfaceHeight = getSurfaceHeight(x, z);
 
-                    CustomBiomeEnum biome = getBiomeAt(new BlockPos(x, surfaceHeight, z));
+                    CustomBiome biome = getBiomeAt(new BlockPos(x, surfaceHeight, z));
                     positions.put(new Vector2i(x, z), new BiomeCheckStore(biome));
                 }
             }
 
+            // unique biome counter
             for (int x = -RADIUS; x < RADIUS; x += 16) {
                 for (int z = -RADIUS; z < RADIUS; z += 16) {
                     Vector2i pos = new Vector2i(x, z);
@@ -319,7 +352,7 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
             }
 
             TerraCraft.LOGGER.info("Biome counts: {}", counts);
-            if (counts.getOrDefault(CustomBiomeEnum.SNOW, 0) > 0 && counts.getOrDefault(CustomBiomeEnum.SNOW, 0) <= 2 && counts.getOrDefault(CustomBiomeEnum.DESERT, 0) > 0) {
+            if (counts.getOrDefault(CustomBiome.SNOW, 0) > 0 && counts.getOrDefault(CustomBiome.SNOW, 0) <= 2 && counts.getOrDefault(CustomBiome.DESERT, 0) > 0 && counts.getOrDefault(CustomBiome.JUNGLE, 0) > 0) {
                 TerraCraft.LOGGER.info("Finished in {} attempts", retryCount + 1);
                 break;
             }
@@ -327,33 +360,55 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
             TerraCraft.LOGGER.info("Regenerating temp map");
 
             counts.clear();
+            heightMap = new SimplexNoiseSampler(heightRand);
             tempMap = new SimplexNoiseSampler(tempRand);
+            humidMap = new SimplexNoiseSampler(humidRand);
         }
     }
 
     private int getSurfaceHeight(int x, int z) {
-        return getSurfaceHeight(x, z, getBiomeAt(new BlockPos(x, SEA_LEVEL, z)));
-    }
+        Map<CustomBiome, Double> weights = getBlendingWeights(x, z);
 
-    private int getSurfaceHeight(int x, int z, CustomBiomeEnum biome) {
-        CustomNoiseParams params = getBlendedNoiseParams(x, z);
-        double n1 = heightNoise.sample(x * params.scale1, z * params.scale1);
-        double n2 = heightNoise.sample(x * params.scale2, z * params.scale2);
+        double plainsHeight = getUnblendedHeight(x, z, CustomBiome.PLAINS);
 
-        double inland = BASE_SURFACE_Y + (n1 * params.amp1) + (n2 * params.amp2);
+        double[] clampedHeights = new double[CustomBiome.values().length];
+        for (CustomBiome bio : CustomBiome.values()) {
+            double biomeHeight = getUnblendedHeight(x, z, bio);
+            clampedHeights[bio.ordinal()] = (bio == CustomBiome.PLAINS) ? biomeHeight : Math.max(biomeHeight, plainsHeight);
+        }
 
-        double oceanNoise = heightNoise.sample(x * 0.02, z * 0.02) * 2.0;
+        double inland = 0;
+        for (CustomBiome bio : CustomBiome.values()) {
+            inland += weights.getOrDefault(bio, 0.0) * clampedHeights[bio.ordinal()];
+        }
+
+        double oceanNoise = heightMap.sample(x * 0.02, z * 0.02) * 2.0;
         double ocean = (OCEAN_FLOOR_Y + oceanNoise);
 
         double b = oceanBlend(x, z);
         double deep = DEEP_OCEAN_FLOOR_Y + oceanNoise;
         double oceanTarget = MathHelper.lerp(b, ocean, deep);
 
-        double h = MathHelper.lerp(b, inland, oceanTarget);
+        double h = getH(b, inland, oceanTarget);
 
         int min = MIN_Y + 1;
         int max = MIN_Y + WORLD_HEIGHT - 2;
         return MathHelper.clamp((int)Math.round(h), min, max);
+    }
+
+    private static double getH(double b, double inland, double oceanTarget) {
+        double coastFactor = 1.0 - MathHelper.clamp(b * 1.3, 0.0, 1.0);
+        double coastalInland = BASE_SURFACE_Y + (inland - BASE_SURFACE_Y) * coastFactor;
+        double h = MathHelper.lerp(b, coastalInland, oceanTarget);
+
+        if (b > SmallWorldParams.OCEAN_BLEND_MIN_THRESHOLD && b < SmallWorldParams.OCEAN_BLEND_MAX_THRESHOLD) {
+//            double t = smoothstep((b - 0.35) / 0.3);
+//            double cap = MathHelper.lerp(t, h, SEA_LEVEL + SmallWorldParams.BEACH_DRY_HEIGHT);
+//            h = Math.min(h, cap);
+            h = Math.min(h, SEA_LEVEL + SmallWorldParams.BEACH_DRY_HEIGHT);
+        }
+
+        return h;
     }
 
     private Random plantRandom(NoiseConfig noiseConfig, int x, int z) {
@@ -443,14 +498,14 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
                     chunk.setBlockState(mpos, dirt, 0);
                 }
 
-                CustomBiomeEnum biome = getBiomeAt(new BlockPos(wx, topY, wz));
+                CustomBiome biome = getBiomeAt(new BlockPos(wx, topY, wz));
 
-                if (biome == CustomBiomeEnum.PLAINS || biome == CustomBiomeEnum.SNOW) {
+                if (biome == CustomBiome.PLAINS || biome == CustomBiome.SNOW) {
                     mpos.set(wx, topY, wz);
                     chunk.setBlockState(mpos, grass, 0);
                 }
 
-                if (biome == CustomBiomeEnum.OCEAN) {
+                if (biome == CustomBiome.OCEAN) {
                     BlockState water = Blocks.WATER.getDefaultState();
                     mpos.set(wx, topY, wz);
                     chunk.setBlockState(mpos, sand, 0);
@@ -463,17 +518,32 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
                     }
                 }
 
-                if (biome == CustomBiomeEnum.BEACH) {
+                if (biome == CustomBiome.BEACH) {
+                    int beachTop = Math.min(topY, SEA_LEVEL - 1);
+
+                    mpos.set(wx, topY, wz);
+                    chunk.setBlockState(mpos, sand, 0);
+
+                    BlockState water = Blocks.WATER.getDefaultState();
+                    for (int y = beachTop + 1; y <= SEA_LEVEL; y++) {
+                        mpos.set(wx, y, wz);
+                        if (chunk.getBlockState(mpos).isAir()) {
+                            chunk.setBlockState(mpos, water, 0);
+                        }
+                    }
+                }
+
+                if (biome == CustomBiome.DESERT) {
                     mpos.set(wx, topY, wz);
                     chunk.setBlockState(mpos, sand, 0);
                 }
 
-                if (biome == CustomBiomeEnum.DESERT) {
+                if (biome == CustomBiome.JUNGLE) {
                     mpos.set(wx, topY, wz);
-                    chunk.setBlockState(mpos, sand, 0);
+                    chunk.setBlockState(mpos, grass, 0);
                 }
 
-                if (biome != CustomBiomeEnum.PLAINS) continue;
+                if (biome != CustomBiome.PLAINS) continue;
 
                 int plantY = topY + 1;
                 if (!chunk.getBlockState(mpos).isOf(Blocks.GRASS_BLOCK)) continue;
@@ -520,7 +590,8 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
 
         Registry<PlacedFeature> placed = world.getRegistryManager().getOrThrow(RegistryKeys.PLACED_FEATURE);
         PlacedFeature oakChecked = placed.get(TreePlacedFeatures.OAK_CHECKED);
-        if (oakChecked == null) return;
+        PlacedFeature jungleChecked = placed.get(TreePlacedFeatures.JUNGLE_TREE);
+        if (oakChecked == null || jungleChecked == null) return;
 
         long s = world.getSeed() ^ (cp.x * 341873128712L) ^ (cp.z * 132897987541L) ^ 0x6A09E667F3BCC909L;
         Random rand = Random.create(s);
@@ -532,6 +603,11 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
 
             int y = world.getTopY(Heightmap.Type.WORLD_SURFACE_WG, x, z);
             BlockPos origin = new BlockPos(x, y, z);
+
+            if (getBiomeAt(origin) == CustomBiome.JUNGLE) {
+                jungleChecked.generate(world, this, rand, origin);
+                continue;
+            }
 
             oakChecked.generate(world, this, rand, origin);
         }

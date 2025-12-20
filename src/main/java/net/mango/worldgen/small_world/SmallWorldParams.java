@@ -1,4 +1,4 @@
-package net.mango.worldgen;
+package net.mango.worldgen.small_world;
 
 import net.minecraft.util.math.MathHelper;
 

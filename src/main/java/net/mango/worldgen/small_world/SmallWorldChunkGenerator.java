@@ -1,4 +1,4 @@
-package net.mango.worldgen;
+package net.mango.worldgen.small_world;
 
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
@@ -6,6 +6,8 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.MapLike;
 import com.mojang.serialization.RecordBuilder;
 import net.mango.TerraCraft;
+import net.mango.worldgen.biomes.CustomBiome;
+import net.mango.worldgen.biomes.CustomBiomeBlendParams;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.enums.DoubleBlockHalf;
@@ -39,8 +41,8 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
-import static net.mango.worldgen.SmallWorldParams.PLAINS_CENTER_RAD;
-import static net.mango.worldgen.SmallWorldParams.smoothstep;
+import static net.mango.worldgen.small_world.SmallWorldParams.PLAINS_CENTER_RAD;
+import static net.mango.worldgen.small_world.SmallWorldParams.smoothstep;
 
 public class SmallWorldChunkGenerator extends ChunkGenerator {
     public static final int RADIUS = SmallWorldParams.RADIUS;
@@ -69,9 +71,6 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
     private static final Identifier HUMID_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "humid_deriver");
     private static final Identifier HUMID_RANDOM_ID = Identifier.of(TerraCraft.MOD_ID, "humid_random");
 
-    private static final Identifier BIOME_HEIGHT_DERIVER_ID = Identifier.of(TerraCraft.MOD_ID, "biome_height_deriver");
-    private static final Identifier BIOME_HEIGHT_RANDOM_ID  = Identifier.of(TerraCraft.MOD_ID, "biome_height_random");
-
     private final Map<CustomBiome, RegistryEntry<Biome>> biomes;
 
     private volatile boolean initFinished = false;
@@ -79,8 +78,6 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
     private volatile SimplexNoiseSampler heightMap;
     private volatile SimplexNoiseSampler tempMap;
     private volatile SimplexNoiseSampler humidMap;
-
-    private volatile SimplexNoiseSampler biomeHeightHint;
 
     private static final List<CustomBiomeBlendParams> BIOME_BLEND_PARAMS = List.of(
             new CustomBiomeBlendParams(CustomBiome.PLAINS, 0.0, 0.2, 0.5),
@@ -286,10 +283,6 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         Random humidRand = noiseConfig.getOrCreateRandomDeriver(HUMID_DERIVER_ID).split(HUMID_RANDOM_ID);
         humidMap = new SimplexNoiseSampler(humidRand);
 
-        // biome height
-        Random bhRand = noiseConfig.getOrCreateRandomDeriver(BIOME_HEIGHT_DERIVER_ID).split(BIOME_HEIGHT_RANDOM_ID);
-        biomeHeightHint = new SimplexNoiseSampler(bhRand);
-
         List<Vector2i> neighbors = List.of(new Vector2i(0, -16), new Vector2i(-16, 0), new Vector2i(0, 16), new Vector2i(16, 0));
 
         for (int retryCount = 0; ; retryCount++) {
@@ -402,9 +395,6 @@ public class SmallWorldChunkGenerator extends ChunkGenerator {
         double h = MathHelper.lerp(b, coastalInland, oceanTarget);
 
         if (b > SmallWorldParams.OCEAN_BLEND_MIN_THRESHOLD && b < SmallWorldParams.OCEAN_BLEND_MAX_THRESHOLD) {
-//            double t = smoothstep((b - 0.35) / 0.3);
-//            double cap = MathHelper.lerp(t, h, SEA_LEVEL + SmallWorldParams.BEACH_DRY_HEIGHT);
-//            h = Math.min(h, cap);
             h = Math.min(h, SEA_LEVEL + SmallWorldParams.BEACH_DRY_HEIGHT);
         }
 

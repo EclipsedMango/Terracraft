@@ -1,10 +1,10 @@
-package net.mango.worldgen;
+package net.mango.worldgen.biomes;
 
 public final class CustomBiomeBlendParams {
-    final CustomBiome biome;
-    final double temp;
-    final double humidity;
-    final double height;
+    public final CustomBiome biome;
+    public final double temp;
+    public final double humidity;
+    public final double height;
 
     public CustomBiomeBlendParams(CustomBiome biome, double temp, double humidity, double height) {
         this.biome = biome;

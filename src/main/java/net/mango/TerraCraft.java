@@ -5,8 +5,8 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
-import net.mango.item.ModItems;
-import net.mango.worldgen.SmallWorldChunkGenerator;
+import net.mango.item.TerracraftItems;
+import net.mango.worldgen.small_world.SmallWorldChunkGenerator;
 import net.mango.worldgen.TerracraftFeatures;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -71,7 +71,7 @@ public class TerraCraft implements ModInitializer {
 
 			if (world.isClient()) return ActionResult.PASS;
 
-			if (stack.isOf(ModItems.LIFE_CRYSTAL)) {
+			if (stack.isOf(TerracraftItems.LIFE_CRYSTAL)) {
                 EntityAttributeInstance inst = player.getAttributeInstance(EntityAttributes.MAX_HEALTH);
 				if (inst == null) return ActionResult.PASS;
 
@@ -100,7 +100,7 @@ public class TerraCraft implements ModInitializer {
 			return ActionResult.PASS;
 		}));
 
-		ModItems.initialize();
+		TerracraftItems.initialize();
 		TerracraftFeatures.register();
 	}
 }

@@ -1,4 +1,4 @@
-package net.mango.worldgen;
+package net.mango.worldgen.biomes;
 
 public enum CustomBiome {
     PLAINS(0.008, 0.02, 5.0, 2.0),
@@ -8,11 +8,11 @@ public enum CustomBiome {
     OCEAN(0.007, 0.02, 4.0, 2.0),
     JUNGLE(0.01, 0.02, 30.0, 1.0);
 
-    final double HILL_SCALE_1;
-    final double HILL_SCALE_2;
+    public final double HILL_SCALE_1;
+    public final double HILL_SCALE_2;
 
-    final double HILL_AMP_1;
-    final double HILL_AMP_2;
+    public final double HILL_AMP_1;
+    public final double HILL_AMP_2;
 
     CustomBiome(double hillScale1, double hillScale2, double hillAmp1, double hillAmp2) {
         HILL_SCALE_1 = hillScale1;

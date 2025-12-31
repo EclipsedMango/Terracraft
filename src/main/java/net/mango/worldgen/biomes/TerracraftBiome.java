@@ -36,8 +36,8 @@ public enum TerracraftBiome {
             case SNOW -> new SimplexTerracraftNoise(random).scale(20.0).offset(64.0).octavate(4, 2.0, 0.5).frequency(1.0 / 128.0);
             case DESERT -> new SimplexTerracraftNoise(random).scale(2.0).offset(64.0).octavate(4, 2.0, 0.5).frequency(1.0 / 128.0);
             case JUNGLE -> new SimplexTerracraftNoise(random).scale(24.0).offset(64.0).octavate(4, 2.0, 0.5).frequency(1.0 / 128.0);
+            case OCEAN -> new SimplexTerracraftNoise(random).scale(1.0).offset(48.0).octavate(4, 2.0, 0.5).frequency(1.0 / 128.0);
             case BEACH -> new SimplexTerracraftNoise(random).scale(1.0).offset(64.0).octavate(4, 2.0, 0.5).frequency(1.0 / 128.0);
-            case OCEAN -> new SimplexTerracraftNoise(random).scale(1.0).offset(32.0).octavate(4, 2.0, 0.5).frequency(1.0 / 128.0);
         };
     }
 
@@ -47,7 +47,8 @@ public enum TerracraftBiome {
             case DESERT -> Blocks.RED_SAND;
             case SNOW -> Blocks.SNOW_BLOCK;
             case JUNGLE -> Blocks.PODZOL;
-            case BEACH, OCEAN -> Blocks.SAND;
+            case BEACH -> Blocks.SAND;
+            case OCEAN -> Blocks.WATER;
         };
     }
 }
